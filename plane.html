@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Plane Spheres</title>
+  <style>
+    body { margin: 0; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+<canvas id="canvas" style="width: 100%; height: 100vh;"></canvas>
+<script>
+const canvas = document.getElementById("canvas");
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+const ctx = canvas.getContext("2d");
+
+const width = canvas.width;
+const height = canvas.height;
+const imgData = ctx.createImageData(width, height);
+
+const camera = {
+  pos: { x: 0, y: 1, z: -5 },
+};
+
+const light = {
+  pos: { x: 5, y: 5, z: -5 }, // Light source to the right
+  color: { r: 255, g: 255, b: 255 }
+};
+
+const spheres = [
+  { center: { x: -1.2, y: 1, z: 3 }, radius: 1, color: { r: 255, g: 0, b: 0 }, shadow: false },
+  { center: { x: 0, y: 1, z: 2.2 }, radius: 1, color: { r: 0, g: 0, b: 255 }, shadow: true } // Right sphere
+];
+
+function normalize(v) {
+  const len = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+  return { x: v.x / len, y: v.y / len, z: v.z / len };
+}
+
+function dot(a, b) {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+function subtract(a, b) {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+}
+
+function add(a, b) {
+  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+}
+
+function scale(v, s) {
+  return { x: v.x * s, y: v.y * s, z: v.z * s };
+}
+
+function intersectPlane(rayOrigin, rayDir, planeY = 0) {
+  const t = (planeY - rayOrigin.y) / rayDir.y;
+  if (t < 0) return null;
+  const hit = add(rayOrigin, scale(rayDir, t));
+  const normal = { x: 0, y: 1, z: 0 };
+  return { t, hit, normal };
+}
+
+function intersectSphere(rayOrigin, rayDir, sphere) {
+  const L = subtract(sphere.center, rayOrigin);
+  const tca = dot(L, rayDir);
+  const d2 = dot(L, L) - tca * tca;
+  const r2 = sphere.radius * sphere.radius;
+  
+  if (d2 > r2) return null;
+
+  const thc = Math.sqrt(r2 - d2);
+  const t0 = tca - thc;
+  const t1 = tca + thc;
+  const t = t0 < 0 ? t1 : t0;
+  
+  if (t < 0) return null;
+
+  const hitPoint = add(rayOrigin, scale(rayDir, t));
+  const normal = normalize(subtract(hitPoint, sphere.center));
+  
+  return { hitPoint, normal };
+}
+
+function inShadow(point, toLight, skipSphere = null) {
+  for (const s of spheres) {
+    if (s === skipSphere) continue;
+    const result = intersectSphere(point, toLight, s);
+    if (result) return true; // If an intersection is found, it is in shadow
+  }
+  return false;
+}
+
+function phongShading(point, normal, color, viewDir, skipSphere = null, isSphere = false) {
+  const toLight = normalize(subtract(light.pos, point));
+  const shadow = inShadow(add(point, scale(normal, 0.01)), toLight, skipSphere);
+  
+  const diff = Math.max(0, dot(normal, toLight));
+  const colorAdjusted = {
+    r: Math.min(255, color.r * diff),
+    g: Math.min(255, color.g * diff),
+    b: Math.min(255, color.b * diff),
+  };
+  
+  if (shadow && isSphere) {
+    colorAdjusted.r *= 0.2;
+    colorAdjusted.g *= 0.2;
+    colorAdjusted.b *= 0.2;
+  }
+
+  if (shadow && !isSphere) {
+    // Apply shadow to the ground as well
+    colorAdjusted.r *= 0.3;
+    colorAdjusted.g *= 0.3;
+    colorAdjusted.b *= 0.3;
+  }
+  
+  return colorAdjusted;
+}
+
+function render() {
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const u = (x - width / 2) / height;
+      const v = (height / 2 - y) / height;
+      const rayDir = normalize({ x: u, y: v, z: 1 });
+      
+      // Check for intersection with plane
+      const groundHit = intersectPlane(camera.pos, rayDir);
+      let color = { r: 135, g: 206, b: 235 }; // Default to sky color
+
+      if (groundHit) {
+        const checker = (Math.floor(groundHit.hit.x) + Math.floor(groundHit.hit.z)) % 2;
+        const colorVal = checker === 0 ? 200 : 100;
+        color = phongShading(groundHit.hit, groundHit.normal, { r: colorVal, g: colorVal, b: colorVal }, scale(rayDir, -1), null, false);
+      }
+
+      // Loop through spheres to check for intersection and calculate shading
+      for (const s of spheres) {
+        const result = intersectSphere(camera.pos, rayDir, s);
+        
+        if (result) {
+          const { hitPoint, normal } = result;
+          const viewDir = scale(rayDir, -1);
+          color = phongShading(hitPoint, normal, s.color, viewDir, null, true);
+        }
+      }
+
+      const i = (y * width + x) * 4;
+      imgData.data[i] = color.r;
+      imgData.data[i + 1] = color.g;
+      imgData.data[i + 2] = color.b;
+      imgData.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+render();
+</script>
+</body>
+</html>
